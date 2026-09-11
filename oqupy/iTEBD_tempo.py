@@ -4,6 +4,7 @@
 # Modified by Paul Eastham (easthamp@tcd.ie) so that the iTEBD-TEMPO class uses the OQuPy BathCorrelations class 
 # to define the bath correlations rather than the bath correlation function itself. 
 # Modified by Émile Cochin so that the iTEBD step is optimized for large Hilbert space sizes
+# Modified by Alex Darbyshire to enable extraction of dynamical maps rather than states. 
 
 from typing import Text
 
@@ -14,6 +15,7 @@ from scipy.sparse.linalg import eigs
 from typing import Callable, Optional
 from oqupy.util import get_progress
 from ncon import ncon  # ncon performs better than np.einsum
+from tqdm import tqdm
 
 from oqupy.bath_correlations import BaseCorrelations
 
@@ -191,6 +193,57 @@ class iTEBD_TEMPO():
 
         print('rank ', self.f.shape[0])
         return info_list[:-1]
+    
+    def evolve(self, h_s: np.ndarray, rho_0: np.ndarray, n: int) -> np.ndarray:
+        """
+        Compute the time evolution for n time steps.
+    
+        :param h_s: System Hamiltonian in the eigenbasis of the coupling operator.
+        :param rho_0: System initial state in the eigenbasis of the coupling operator.
+        :param n: Number of time-steps for the propagation.
+        :return: Time evolution of density matrix.
+        """
+    
+        assert self.f is not None, "the influence functional has not yet been computed, run self.compute_f first"
+    
+        liu_s = np.kron(expm(-1j * h_s * self.delta / 2), expm(1j * h_s * self.delta / 2).T)
+        u = np.einsum('ab,bc->abc', liu_s.T, liu_s.T)
+    
+        rho_t = np.empty((n + 1, self.s_dim, self.s_dim), dtype=np.complex128)
+        rho_t[0] = rho_0
+    
+        evol_tens = ncon([self.f[:, :-1, :], u], [[-1, 2, -3], [-2, 2, -4]])
+        state = ncon([self.v_l, rho_0.flatten()], [[-2], [-3]])
+    
+        for i in tqdm(range(n), desc='time evolution running'):
+            state = ncon([state, evol_tens], [[1, 2], [1, 2, -2, -3]])
+            rho_t[i + 1] = ncon([self.v_r, state], [[1], [1, -1]]).reshape(rho_0.shape)
+        return rho_t
+    
+    def get_maps(self, h_s: np.ndarray, n: int) -> np.ndarray:
+        """
+        Compute the (time-nonlocal) dynamical maps for n time steps.
+    
+        :param h_s: System Hamiltonian in the eigenbasis of the coupling operator.
+        :param n: Number of time-steps for the propagation.
+        :return: Time evolution of density matrices.
+        """
+    
+        assert self.f is not None, "the influence functional has not yet been computed, run self.compute_f first"
+    
+        liu_s = np.kron(expm(-1j * h_s * self.delta / 2), expm(1j * h_s * self.delta / 2).T)
+        u = np.einsum('ab,bc->abc', liu_s.T, liu_s.T)
+    
+        evol_tens = ncon([self.f[:, :-1, :], u], [[-1, 2, -3], [-2, 2, -4]])
+        temp_map = ncon([self.v_l, evol_tens], [[1], [1,-1,-2,-3]])
+       
+        dyn_map = np.empty((n, self.s_dim**2, self.s_dim**2), dtype=np.complex128)
+        dyn_map[0] = ncon([self.v_r, temp_map], [[1], [-2,1,-1]])
+        
+        for i in tqdm(range(n-1), desc='time evolution running'):
+            temp_map = ncon([temp_map, evol_tens], [[-1, 1, 2], [1, 2, -2, -3]])
+            dyn_map[i + 1] = ncon([self.v_r, temp_map], [[1], [-2, 1, -1]])
+        return dyn_map
 
 
 def iTEBD_apply_gate(gate: np.ndarray, endbool, A: np.ndarray, sAB: np.ndarray, B: np.ndarray, sBA: np.ndarray, rank: int, rtol: float, ctol: Optional[float] = 1e-13):
