@@ -1,0 +1,95 @@
+import oqupy
+import numpy as np
+import pickle
+from oqupy import iTEBD_tempo
+
+#Define matrix describing "a dagger plus a" operator and number operator
+#for a given bosonic cutoff 
+
+N=2
+Isys=np.identity(2)
+Irc=np.identity(N)
+RCpos=np.zeros((N,N))
+numb=np.zeros((N,N))
+
+popmats=[]
+
+for n in range(N):
+    popmats.append(np.zeros((N,N)))
+    popmats[n][n][n]=1
+    popmats[n]=np.kron(Isys,popmats[n])    
+
+for n in range(N-1):
+    RCpos[n][n+1]=np.sqrt(n+1)
+    RCpos[n+1][n]=np.sqrt(n+1)
+    numb[n+1][n+1]=n+1
+
+#Define relevant operators on total sys+RC Hilbert space    
+    
+RCpos=np.kron(Isys,RCpos)
+numb=np.kron(Isys,numb)
+
+sigma_x = np.kron(oqupy.operators.sigma("x"),Irc)
+sigma_z = np.kron(oqupy.operators.sigma("z"),Irc)
+sigma_z_RC=np.kron(Isys,oqupy.operators.sigma("z"))
+
+#System + SD Parameters 
+
+omega_cutoff = 22.5
+gamma = 5.304
+kap=0.817
+gam=0.002
+
+#RC related parameters
+
+mega=7.5
+
+lamb= kap/np.sqrt(2*mega)
+
+print(lamb)
+
+#System Hamiltonian
+
+H_s=0.5 * (gamma * sigma_x) + lamb*sigma_z.dot(RCpos) + mega*numb
+
+#Correlations + bath for transformed configuration
+
+def j_rc(w):
+    return gam*w
+
+correlations= oqupy.CustomSD(j_rc, cutoff=omega_cutoff, 
+                             cutoff_type='exponential')
+
+#Parameters for TEMPO
+
+dt=0.76
+tcut=760
+epsrel=10**(-7)
+epsrat=1
+end_time=667
+
+#TEMPO TTI-PT computation for each initial state
+
+states = []
+evals, evecs=np.linalg.eig(RCpos)
+
+#Write system Hamiltonian in eigenbasis of coupling operator
+
+P=evecs.T
+H_s=np.dot(np.dot(np.linalg.pinv(P),H_s),P)
+
+#Compute maps (called 'states' here as a relic of previous code version)
+
+func=iTEBD_tempo.iTEBD_TEMPO(evals,delta=dt,bath_correlations=correlations, n_c=int(tcut/dt))
+func.compute_f_enhanced(epsrel,epsrel/epsrat,epsrel/epsrat)
+        
+states=func.get_maps(H_s, int(end_time/dt))
+
+#Save total array of states over each timestep and initial state (and parameters)
+
+prms=[N,end_time,dt,P]
+
+with open(r'C:\Users\ajd31\OneDrive - University of St Andrews\Python Scripts Year 1\pickledata\RC_TTI_PT.pickle', "wb") as f:
+    pickle.dump(states, f )
+with open(r'C:\Users\ajd31\OneDrive - University of St Andrews\Python Scripts Year 1\pickledata\TTI_Params.pickle', "wb") as g:
+    pickle.dump(prms, g )
