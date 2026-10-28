@@ -1,6 +1,5 @@
 # Implementation of transverse contraction for a chain-mapped open quantum system
 #Original code modified from https://github.com/emile-cochin/OQuPy/tree/TTIPT
-# Modified by Alex Darbyshire to enable extraction of dynamical maps rather than states. 
 
 from typing import Text
 
@@ -56,7 +55,7 @@ class Chain_TC():
         else:
             self.chain_prms = chain_prms
         if np.abs((self.chain_prms[0][-1]-self.chain_prms[0][-2])/self.chain_prms[0][-1])>self.eps or np.abs((self.chain_prms[1][-1]-self.chain_prms[1][-2])/self.chain_prms[1][-1])>self.eps:
-            print('Warning: chain uniformity may not be accurate for given cutoff, the algorithm may become unstable. It is recommended to increase N until this message no longer appears.')
+            print('Warning: Chain uniformity may not be accurate for given cutoff, the algorithm may become unstable. It is recommended to increase N until this message no longer appears.')
         
         self.f = None
         return
@@ -65,20 +64,46 @@ class Chain_TC():
         
         if soft==1:
             c0 = w_cutoff*np.sqrt(2*alpha*gamma(s+1))
-            e = [w_cutoff*(2*n+1+s) for n in range(nummodes-1)]
-            t = [w_cutoff*np.sqrt((n+1)*(n+s+1)) for n in range(nummodes-2)]
+            e = [w_cutoff*(2*n+1+s) for n in range(nummodes)]
+            t = [w_cutoff*np.sqrt((n+1)*(n+s+1)) for n in range(nummodes-1)]
         else:
             if s==0:
                 c0 = np.sqrt(2*alpha)*w_cutoff
                 e = np.repeat(0.5*w_cutoff,nummodes)
-                t = [w_cutoff*(1+n)**2/((2+2*n)*(3+2*n))*np.sqrt((3+2*n)/(1+2*n)) for n in range(nummodes-2)]
+                t = [w_cutoff*(1+n)**2/((2+2*n)*(3+2*n))*np.sqrt((3+2*n)/(1+2*n)) for n in range(nummodes-1)]
             else:
                 c0 = np.sqrt(2*alpha/(s+1))*w_cutoff
-                e = [(w_cutoff/2)*(1 +(s**2)/((s+2*n)*(2+s+2*n))) for n in range(nummodes-1)]
-                t = [w_cutoff*(1+n)*(1+s+n)/((s+2+2*n)*(s+3+2*n))*np.sqrt((3+s+2*n)/(1+s+2*n)) for n in range(nummodes-2)]
+                e = [(w_cutoff/2)*(1 +(s**2)/((s+2*n)*(2+s+2*n))) for n in range(nummodes)]
+                t = [w_cutoff*(1+n)*(1+s+n)/((s+2+2*n)*(s+3+2*n))*np.sqrt((3+s+2*n)/(1+s+2*n)) for n in range(nummodes-1)]
             
         return [e, t, c0]
+    
+    def leading_eig(self, A, num_iterations: int =100):
+        n = A.shape[0]
+        # Start with a random initial vector
+        v = np.random.rand(n)
+        v = v / np.linalg.norm(v)
+        
+        for _ in range(num_iterations):
+            # Multiply matrix A by current vector
+            av = np.dot(A, v)
+            # Normalize the vector
+            v = av / np.linalg.norm(av)          
+        return v
 
+    def ptrace(self, rho):
+        chi=rho.shape[0]/self.S_dim
+        rho_S=np.zeros((self.S_dim,self.S_dim),dtype=np.complex128)
+        for i,j in product(range(self.S_dim), repeat=2):
+            for k in range(int(chi)):            
+                bas1=np.zeros(rho.shape[0],dtype=np.complex128)
+                bas2=np.zeros(rho.shape[0],dtype=np.complex128)
+                bas1[k*self.S_dim+i]=1
+                bas2[k*self.S_dim+j]=1
+                rho_S[i][j] += bas1 @ rho @ bas2
+        return rho_S
+
+        
     
     def compute_chain_f(self, rtol: float, d: int =2, rank: Optional[int] = np.inf, show_info=True):
         """
@@ -104,22 +129,22 @@ class Chain_TC():
         four_leg_gate=np.zeros((d,d,d,d), dtype=np.complex_)
             
         info_list = []
-        A = np.zeros((d, d, d))
-        for i in range(d):
-            A[i][i][i]=1
+        A = np.zeros((d, d, d))            
         B = np.zeros((d, d, d))
         for i in range(d):
+            A[i][i][i]=1
             B[i][i][i]=1
-        sAB = np.asarray([1/np.sqrt(d)])
-        sBA = np.asarray([1/np.sqrt(d)])
+        sAB = np.repeat(1/np.sqrt(d),d)
+        sBA = np.repeat(1/np.sqrt(d),d)
 
         progress = get_progress(self.progress_type)
         with progress(self.N, '--> Building influence functional:') as prog_bar:
             for k in range(1, self.N + 1):
+                
                 if k==self.N:
-                    gate = np.expm(- 1j * self.delta * (0.5 * self.chain_prms[0][self.N - k] * numb1 + self.chain_prms[2] * np.kron((bdag + b),self.S)))
+                    gate = expm(- 1j * self.delta * (0.5 * self.chain_prms[0][self.N - k] * numb1 + self.chain_prms[2] * np.kron((bdag + b),self.S)))
                 else:
-                    gate = np.expm(- 1j * self.delta * (0.5 * (self.chain_prms[0][self.N - k] * numb1 + self.chain_prms[0][self.N - k - 1] * numb2) + self.chain_prms[1][self.N - k -1] * (swap1to2 + swap2to1)))
+                    gate = expm(- 1j * self.delta * (0.5 * (self.chain_prms[0][self.N - k] * numb1 + self.chain_prms[0][self.N - k - 1] * numb2) + self.chain_prms[1][self.N - k -1] * (swap1to2 + swap2to1)))
                 
                 for m,n,p,q in product(range(d), repeat=4):
                         four_leg_gate[m][n][p][q]=gate.T[d*m+n][d*q+p]
@@ -130,27 +155,27 @@ class Chain_TC():
                     A, sAB, B, sBA, info = iTEBD_apply_gate(four_leg_gate, A, sAB, B, sBA, rank, rtol=rtol)
 
                 if show_info:
-                    info_str = f' d1:{info[0]}/{self.nu_dim}, d2:{info[1]}/{self.nu_dim}, chi:{info[2]}'
+                    info_str = f' d1:{info[0]}, d2:{info[1]}, chi:{info[2]}'
                     prog_bar.info = info_str
                     info_list.append(info)
                     
                 prog_bar.update(k)
+        print('Contracting to f...')
         self.f = ncon([np.diag(sAB), B, np.diag(sBA), A], [[-1, 1], [1, -2, 2], [2, 3], [3, -3, -4]])
-
+        print('Computing boundary vectors...')
         """if sAB.shape[0] == 1:
             # handle trivial f
             self.f = np.ones((1, self.S_dim, self.S_dim, 1)) """
 
         # compute f^\inf = v_r * v_l^T using Lanczos
         ftemp = self.f.reshape(self.f.shape[0] * self.f.shape[1], self.f.shape[2] * self.f.shape[3])
-        w, v_r = eigs(ftemp, 1, which='LR')
-        w, v_l = eigs(ftemp.T, 1, which='LR')
+        v_l = self.leading_eig(ftemp.T)
         
         #'Lower' index of leading eigenvectors is traced over, to give correct terminations to PT
-        self.v_r = ncon([v_r[:,0].reshape([self.f.shape[2], self.f.shape[3]]), np.ones((self.f.shape[2]))], [[1, -1],[1]])
-        v_l = ncon([v_l[:,0].reshape([self.f.shape[0], self.f.shape[1]]), np.ones((self.f.shape[1]))], [[-1, 1],[1]])
-        self.v_l = v_l[:, 0] / (v_l[:, 0] @ self.v_r[:, 0])
-
+        v_l = ncon([v_l.reshape([self.f.shape[0], self.f.shape[1]]), np.ones((self.f.shape[1]))], [[-1, 1],[1]])
+        self.v_l = v_l / norm(v_l)
+      
+        
         print('rank ', self.f.shape[0])
         return info_list[:-1]
     
@@ -158,8 +183,8 @@ class Chain_TC():
         """
         Compute the time evolution for n time steps.
     
-        :param h_s: System Hamiltonian in the eigenbasis of the coupling operator.
-        :param rho_0: System initial state in the eigenbasis of the coupling operator.
+        :param h_s: System Hamiltonian.
+        :param rho_0: System initial state.
         :param n: Number of time-steps for the propagation. 
         :return: Time evolution of density matrix.
         """
@@ -168,25 +193,22 @@ class Chain_TC():
     
         u_s = expm(-1j * h_s * self.delta)
     
-        psi_t = np.empty((n + 1, self.S_dim), dtype=np.complex128)
-        psi_t[0] = psi_0
+        rho_t = np.empty((n + 1, self.S_dim, self.S_dim), dtype=np.complex128)
+        rho_t[0] = np.outer(psi_0,psi_0)
     
         evol_tens = ncon([self.f, u_s], [[-1, -2, 1, -4], [1, -3]])
         state = ncon([self.v_l, psi_0], [[-2], [-3]])
-    
         for i in tqdm(range(n), desc='time evolution running'):
-            state = ncon([state, evol_tens], [[1, 2], [1, 2, -2, -3]])
-            psi_t[i + 1] = ncon([state, self.v_r], [[-1,1],[1]])
-        return psi_t
+            state = ncon([state, evol_tens], [[1, 2], [1, 2, -3, -2]])
+            rho_t[i + 1] = self.ptrace(np.outer(state.reshape(evol_tens.shape[3],evol_tens.shape[2]),state.reshape(evol_tens.shape[3],evol_tens.shape[2])))
+        return rho_t
     
-    def get_maps(self, h_s: np.ndarray, n: int) -> np.ndarray:
-        """
+    """def get_maps(self, h_s: np.ndarray, n: int) -> np.ndarray:
         Compute the (time-nonlocal) dynamical maps for n time steps.
     
         :param h_s: System Hamiltonian in the eigenbasis of the coupling operator.
         :param n: Number of time-steps for the propagation.
         :return: Time evolution of density matrices.
-        """
     
         assert self.f is not None, "the influence functional has not yet been computed, run self.compute_f first"
     
@@ -202,7 +224,7 @@ class Chain_TC():
         for i in tqdm(range(n-1), desc='time evolution running'):
             temp_map = ncon([temp_map, evol_tens], [[-1, 1, 2], [1, 2, -2, -3]])
             dyn_map[i + 1] = ncon([self.v_r, temp_map], [[1], [-2, 1, -1]])
-        return dyn_map
+        return dyn_map"""
 
 def iTEBD_apply_gate(gate: np.ndarray, A: np.ndarray, sAB: np.ndarray, B: np.ndarray, sBA: np.ndarray, rank: int, rtol: float, ctol: Optional[float] = 1e-13):
     """
@@ -228,10 +250,9 @@ def iTEBD_apply_gate(gate: np.ndarray, A: np.ndarray, sAB: np.ndarray, B: np.nda
     # MPS - gate contraction
     d1 = gate.shape[1]
     d2 = gate.shape[2]
-    rank_BA = A.shape[0]
+    rank_BA = sBA.shape[0]
 
     u, s_vals, v = svd(np.einsum('a,acd,d,dfg,g,cnmf->anmg', sBA, A, sAB, B, sBA, gate).reshape([d1 * rank_BA, d2 * rank_BA]), full_matrices=False)
-
     # truncate singular values
     if rtol is None:
         rank_new = min(rank, len(s_vals))
@@ -239,11 +260,11 @@ def iTEBD_apply_gate(gate: np.ndarray, A: np.ndarray, sAB: np.ndarray, B: np.nda
         s_vals_sum = np.cumsum(s_vals) / np.sum(s_vals)
         rank_rtol = np.searchsorted(s_vals_sum, 1 - rtol) + 1
         rank_new = min(rank, len(s_vals), rank_rtol)
-    u = u[:, :rank_new].reshape(sBA.shape[0], d1 * rank_new)
+    u = u[:, :rank_new].reshape(rank_BA, d1 * rank_new)
     v = v[:rank_new, :].reshape(rank_new * d2, rank_BA)
-
+    
     # factor out sAB weights from A and B
-    A = (np.diag(1 / sBA) @ u).reshape(sBA.shape[0], d1, rank_new)
+    A = (np.diag(1 / sBA) @ u).reshape(rank_BA, d1, rank_new)
     B = (v @ np.diag(1 / sBA)).reshape(rank_new, d2, rank_BA)
 
     # new weights
