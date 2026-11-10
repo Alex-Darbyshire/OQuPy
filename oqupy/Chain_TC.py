@@ -135,7 +135,7 @@ class Chain_TC():
             A[i][i][i]=1
             B[i][i][i]=1
         sAB = np.repeat(1/np.sqrt(d),d)
-        sBA = np.repeat(1/np.sqrt(d),d)
+        sBA = np.repeat(1,d)
 
         progress = get_progress(self.progress_type)
         with progress(self.N, '--> Building influence functional:') as prog_bar:
@@ -253,6 +253,7 @@ def iTEBD_apply_gate(gate: np.ndarray, A: np.ndarray, sAB: np.ndarray, B: np.nda
     rank_BA = sBA.shape[0]
 
     u, s_vals, v = svd(np.einsum('a,acd,d,dfg,g,cnmf->anmg', sBA, A, sAB, B, sBA, gate).reshape([d1 * rank_BA, d2 * rank_BA]), full_matrices=False)
+    
     # truncate singular values
     if rtol is None:
         rank_new = min(rank, len(s_vals))
